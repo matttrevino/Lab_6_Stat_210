@@ -9,7 +9,12 @@ The data come to us from [TidyTuesday](https://github.com/rfordatascience/tidytu
 
 ```{r}
 #| label: setup
-
+library(tidyverse)
+library(readr)
+library(ggformula)
+library(forcats)
+library(dplyr)
+library(ggplot2)
 ```
 
 ```{r}
@@ -21,6 +26,7 @@ counties <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytues
 ```
 
 **1. Briefly describe the dataset (~ 4 sentences). What information does it contain?**
+> The data set for childcare describes different demographic data of a city population based on multiple factors. These include things like study year, ethnicity, whether their parents are employed, salaries,  the total population of the area, specific positions like sales or service industries, as well as child care costs for various things!
 
 ## California Childcare Costs
 
@@ -32,7 +38,15 @@ Let's start by focusing only on California.
 
 ```{r}
 #| label: ca-childcare-costs
-
+#creating new data sets tho these may be redundant
+counties_data <- subset(counties, state_name == "California")
+counties_data_1 <- counties_data[, c("county_fips_code", "county_name")]
+#creating child care by these variables since fips code matches data sets
+childcare_costs_data <- childcare_costs[, c("county_fips_code", "study_year", "mcsa", "mfccsa", "mc_infant", "mc_toddler", "mc_preschool", "mfcc_infant", "mfcc_toddler", "mfcc_preschool", "mhi_2018")]
+#merging the two data sets together by fips code
+total_childcare <- merge(counties_data_1, childcare_costs_data, by = "county_fips_code") 
+#removing all fips codes that are not California fips codes
+ca_childcare <- subset(total_childcare, county_fips_code >= 6011 & county_fips_code <= 6115)
 ```
 
 **3. Using a function from the `forcats` package, complete the code below to create a new variable where each county is categorized into one of the [10 Census regions](https://census.ca.gov/regions/) in California. Use the Region description (from the plot), not the Region number. An example region has been started for you.**  
@@ -44,10 +58,9 @@ Let's start by focusing only on California.
 
 ca_childcare <- ca_childcare |> 
   mutate(county_name = str_remove(county_name, " County")) |> 
-  mutate(region = fct_______(county_name,
-    'Superior California' = c("Butte", "Colusa", "El Dorado". ...),
-     ...
-    ))
+  mutate(region = fct_collapse(county_name,
+    'Superior California' = c("Butte", "Colusa", "El Dorado", "Glenn", "Lassen", "Modoc", "Nevada", "Placer", "Plumas", "Sacramento", "Shasta", "Sierra", "Siskiyou", "Sutter", "Tehama", "Yolo", "Yuba"), 'North Coast' = c("Del Norte", "Humboldt", "Lake", "Mendocino", "Napa", "Sonoma", "Trinity"), 'San Francisco Bay Area' = c("Alameda", "Contra Costa", "Marin", "San Francisco", "San Mateo", "Santa Clara", "Solano"), 'Northern San Joaquin Valley' = c("Alpine", "Amador", "Calaveras", "Madera", "Mariposa", "Merced", "Mono", "San Joaquin", "Stanislaus", "Tuolumne"), 'Central Coast' = c("Monterey", "San Benito", "San Luis Obispo", "Santa Barbara", "Santa Cruz", "Ventura"), 'Southern San Joaquin Valley' = c("Fresno", "Inyo", "Kern", "Kings", "Tulare"), 'Inland Empire' = c("Riverside", "San Bernardino"), 'Los Angeles County' = ("Los Angeles"), 'Orange County' = ("Orange"), 'San Diego - Imperial' = c("Imperial", "San Diego")
+  ))
 ```
 
 
@@ -56,8 +69,14 @@ ca_childcare <- ca_childcare |>
 ```{r}
 #| label: median-income-by-region-over-time
 # Hint: You will want to calculate the median of median income before you make columns for 2008/2018 by transforming the data
-
-
+ca_childcare_filtered <- ca_childcare |>
+  filter(study_year %in% c(2008, 2018)) |>
+  rename('Median_Income' = mhi_2018)
+ca_childcare_inc_region <- ca_childcare_filtered |>
+  group_by(region, study_year) |>
+  summarise(Median_Income = median(Median_Income, na.rm = TRUE)) |>
+  ungroup() |>
+  pivot_wider(names_from = study_year, values_from = Median_Income)
 ```
 
 
@@ -65,10 +84,16 @@ ca_childcare <- ca_childcare |>
 
 *Hint: The code should give me the EXACT answer. This means having the code output the exact row(s) and variable(s) necessary for providing the solution. Consider the `slice()` functions.*
 
+> Superior California and North Coast both had reported medians for full-time median weekly price for center-based childcare for infants in 2018 of $99.77. 
+
 ```{r}
 #| label: lowest-median-weekly-price-2018
-
-
+lowest_median_2018 <- ca_childcare_filtered |>
+  filter(study_year == 2018) |>
+  group_by(region) |>
+  slice_min(order_by = mcsa, n = 1) |>
+  ungroup()
+lowest_median_2018
 ```
 
 **6. Recreate the plot (look at online instructions) that shows, for all ten regions, the change over time of the full-time median price for center-based childcare for infants, toddlers, and preschoolers. Recreate the plot. You do not have to replicate the exact colors or theme, but your plot should have the same content, including the order of the facets and legend, reader-friendly labels, axes breaks, and a  smooth function.**
@@ -76,7 +101,37 @@ ca_childcare <- ca_childcare |>
 
 ```{r}
 #| label: recreate-plot
-
+ca_long <- ca_childcare |>
+  select(region, study_year, mc_infant, mc_toddler, mc_preschool) |>
+  pivot_longer(
+    cols = starts_with("mc_"),
+    names_to = "care_type",
+    values_to = "price"
+  )
+ca_long <- ca_long |>
+  mutate(care_type = recode(care_type,
+    mc_infant = "Infant",
+    mc_toddler = "Toddler",
+    mc_preschool = "Preschool"
+  ))
+ggplot(ca_long, aes(x = study_year, y = price, color = region)) +
+  geom_point(size = 2) +  
+  geom_smooth(aes(group = region), method = "loess", se = FALSE, linewidth = 1) +  
+  facet_wrap(~ care_type, scales = "free_y") +  
+  scale_x_continuous(breaks = c(2008, 2010, 2012, 2014, 2016, 2018)) +
+  scale_y_continuous(labels = scales::label_dollar(), limits = c(0,500)) +
+  labs(
+    title = "Price Change of Child Care by Region (2008–2018)",
+    x = "Year",
+    y = "Monthly Cost",
+    theme = "Region"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+ggsave("childcare_plot.png", width = 12, height = 8, dpi = 300)
 ```
 
 
